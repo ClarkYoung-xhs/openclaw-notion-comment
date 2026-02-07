@@ -3,5 +3,8 @@
     "pollIntervalMinutes": 15,
     "indexPage": "",
     "watchedPages": [],
-    "integrationUserId": ""
+    "integrationUserId": "",
+    "aiBaseUrl": "https://right.codes/codex/v1",
+    "aiApiKey": "your-ai-api-key",
+    "aiModel": "gpt-5.1-codex"
 }

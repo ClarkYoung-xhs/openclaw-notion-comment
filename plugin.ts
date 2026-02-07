@@ -39,6 +39,9 @@ interface PluginConfig {
     watchedPages: string[];  // Fallback: explicit page IDs
     notionApiKey?: string;   // Notion integration secret
     integrationUserId?: string; // Bot user ID to avoid self-reply
+    aiBaseUrl?: string;      // AI API base URL (e.g. https://right.codes/codex/v1)
+    aiApiKey?: string;       // AI API key
+    aiModel?: string;        // AI model name (e.g. gpt-5.1-codex)
 }
 
 interface ProcessedState {
@@ -301,9 +304,51 @@ async function getWatchedPagesFromIndex(
     return extractPageLinks(blocks);
 }
 
+// AI completion via direct API call
+async function callAI(
+    config: PluginConfig,
+    prompt: string
+): Promise<string> {
+    const baseUrl = config.aiBaseUrl || "https://right.codes/codex/v1";
+    const apiKey = config.aiApiKey;
+    const model = config.aiModel || "gpt-5.1-codex";
+
+    if (!apiKey) {
+        console.error(`${LOG_PREFIX} AI API key not configured. Set "aiApiKey" in config.json`);
+        return "抱歉，AI 回复功能未配置。";
+    }
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            model,
+            messages: [
+                {
+                    role: "system",
+                    content: "你是一个友好、专业的 AI 助手。用户在 Notion 文档中发表了评论，请用简洁的中文回复。不要使用 Markdown 格式。",
+                },
+                { role: "user", content: prompt },
+            ],
+            max_tokens: 1024,
+        }),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`AI API error ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json() as any;
+    return data.choices?.[0]?.message?.content || "抱歉，我暂时无法处理这条评论。";
+}
+
 // Agent integration
 async function processCommentWithAgent(
-    runtime: any,
+    config: PluginConfig,
     commentText: string,
     pageTitle?: string,
     quote?: string
@@ -320,14 +365,7 @@ async function processCommentWithAgent(
     }
 
     try {
-        const result = await runtime.invoke({
-            prompt,
-            context: {
-                source: "notion-doc-comment",
-                type: "document-comment",
-            },
-        });
-        return result.response || "抱歉，我暂时无法处理这条评论。";
+        return await callAI(config, prompt);
     } catch (error) {
         console.error(`${LOG_PREFIX} Agent invocation failed:`, error);
         return "抱歉，处理评论时遇到了问题，请稍后再试。";
@@ -362,12 +400,11 @@ function groupByDiscussion(comments: NotionComment[]): Map<string, NotionComment
 
 // Main polling logic
 async function pollNotionComments(
-    config: PluginConfig,
+    pluginConfig: PluginConfig,
     notion: Client,
-    runtime: any,
     integrationUserId?: string
 ): Promise<void> {
-    if (!config.enabled) {
+    if (!pluginConfig.enabled) {
         console.log(`${LOG_PREFIX} Plugin is disabled`);
         return;
     }
@@ -377,14 +414,14 @@ async function pollNotionComments(
     // Get watched pages: from index page or explicit config
     let watchedPages: string[] = [];
 
-    if (config.indexPage) {
-        console.log(`${LOG_PREFIX} Reading index page: ${config.indexPage}`);
-        watchedPages = await getWatchedPagesFromIndex(notion, config.indexPage);
+    if (pluginConfig.indexPage) {
+        console.log(`${LOG_PREFIX} Reading index page: ${pluginConfig.indexPage}`);
+        watchedPages = await getWatchedPagesFromIndex(notion, pluginConfig.indexPage);
     }
 
     // Fallback to explicit config
-    if (watchedPages.length === 0 && config.watchedPages?.length > 0) {
-        watchedPages = config.watchedPages;
+    if (watchedPages.length === 0 && pluginConfig.watchedPages?.length > 0) {
+        watchedPages = pluginConfig.watchedPages;
     }
 
     if (watchedPages.length === 0) {
@@ -442,7 +479,7 @@ async function pollNotionComments(
                 console.log(`${LOG_PREFIX} New ${commentType} comment: "${commentText.substring(0, 50)}..."${quote ? ` [on: "${quote.substring(0, 30)}..."]` : ""}`);
 
                 const pageTitle = await getPageTitle(notion, pageId);
-                const response = await processCommentWithAgent(runtime, commentText, pageTitle, quote);
+                const response = await processCommentWithAgent(pluginConfig, commentText, pageTitle, quote);
                 const success = await replyToComment(notion, discussionId, response);
 
                 if (success) {
@@ -465,6 +502,21 @@ async function pollNotionComments(
 // Plugin entry point
 export default function createPlugin(ctx: any) {
     const { config } = ctx;
+
+    // DEBUG: Explore runtime API to support "Chat over Comment"
+    if (ctx.runtime) {
+        console.log(`${LOG_PREFIX} runtime keys:`, Object.keys(ctx.runtime));
+        if (ctx.runtime.channel) {
+            console.log(`${LOG_PREFIX} runtime.channel keys:`, Object.keys(ctx.runtime.channel));
+            // Log types of channel methods
+            for (const k of Object.keys(ctx.runtime.channel)) {
+                console.log(`${LOG_PREFIX} runtime.channel.${k} type:`, typeof ctx.runtime.channel[k]);
+            }
+        }
+        if (ctx.runtime.system) {
+            console.log(`${LOG_PREFIX} runtime.system keys:`, Object.keys(ctx.runtime.system));
+        }
+    }
 
     // Load config.json for plugin-specific settings
     const fileConfig = loadPluginConfig();
@@ -490,6 +542,9 @@ export default function createPlugin(ctx: any) {
         pollIntervalMinutes: fileConfig.pollIntervalMinutes ?? 15,
         indexPage: fileConfig.indexPage,
         watchedPages: fileConfig.watchedPages ?? [],
+        aiBaseUrl: fileConfig.aiBaseUrl,
+        aiApiKey: fileConfig.aiApiKey,
+        aiModel: fileConfig.aiModel,
     };
 
     if (!pluginConfig.enabled) {
@@ -513,7 +568,7 @@ export default function createPlugin(ctx: any) {
 
     const doPoll = async () => {
         try {
-            await pollNotionComments(pluginConfig, notion, ctx, integrationUserId);
+            await pollNotionComments(pluginConfig, notion, integrationUserId);
         } catch (error) {
             console.error(`${LOG_PREFIX} Poll error:`, error);
         }
