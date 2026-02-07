@@ -311,7 +311,7 @@ async function callAI(
 ): Promise<string> {
     const baseUrl = config.aiBaseUrl || "https://right.codes/codex/v1";
     const apiKey = config.aiApiKey;
-    const model = config.aiModel || "gpt-5.1-codex";
+    const model = config.aiModel || "gpt-5.3-codex-xhigh";
 
     if (!apiKey) {
         console.error(`${LOG_PREFIX} AI API key not configured. Set "aiApiKey" in config.json`);

@@ -6,5 +6,5 @@
     "integrationUserId": "",
     "aiBaseUrl": "https://right.codes/codex/v1",
     "aiApiKey": "your-ai-api-key",
-    "aiModel": "gpt-5.1-codex"
+    "aiModel": "gpt-5.3-codex-xhigh"
 }
