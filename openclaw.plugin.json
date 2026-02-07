@@ -1,0 +1,32 @@
+{
+    "id": "notion-doc-comment",
+    "name": "Notion Document Comment",
+    "version": "0.1.0",
+    "description": "Monitor and respond to Notion page comments via polling. Supports index page pattern.",
+    "author": "Clark",
+    "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "enabled": {
+                "type": "boolean",
+                "default": true
+            },
+            "pollIntervalMinutes": {
+                "type": "number",
+                "default": 15
+            },
+            "indexPage": {
+                "type": "string",
+                "description": "ID of index page containing links to monitored pages"
+            },
+            "watchedPages": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                },
+                "default": []
+            }
+        }
+    }
+}

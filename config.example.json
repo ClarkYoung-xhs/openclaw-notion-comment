@@ -1,0 +1,7 @@
+{
+    "notionApiKey": "secret_your_notion_integration_token",
+    "pollIntervalMinutes": 15,
+    "indexPage": "",
+    "watchedPages": [],
+    "integrationUserId": ""
+}

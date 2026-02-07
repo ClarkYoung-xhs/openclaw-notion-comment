@@ -1,0 +1,28 @@
+{
+    "name": "@openclaw/notion-doc-comment",
+    "version": "0.1.0",
+    "description": "Notion document comment polling plugin for OpenClaw - responds to page comments via Agent",
+    "main": "plugin.ts",
+    "type": "module",
+    "scripts": {
+        "build": "echo 'No build needed - jiti loads TS at runtime'"
+    },
+    "keywords": [
+        "openclaw",
+        "notion",
+        "document",
+        "comment",
+        "polling"
+    ],
+    "author": "Clark",
+    "license": "MIT",
+    "dependencies": {
+        "@notionhq/client": "^2.2.0"
+    },
+    "openclaw": {
+        "extensions": [
+            "./plugin.ts"
+        ],
+        "installDependencies": true
+    }
+}
