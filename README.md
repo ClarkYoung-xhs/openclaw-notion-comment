@@ -1,129 +1,133 @@
 # Notion Document Comment Plugin for OpenClaw
 
-Monitor Notion page comments and respond automatically via AI agent.
+Monitor Notion page comments and auto-reply with AI.
 
-## Features
+## What this plugin does
 
-- 🔄 **Polling**: Periodically checks for new comments on watched pages
-- 🤖 **AI Reply**: Generates intelligent responses via OpenClaw agent
-- 📑 **Index Page Pattern**: A main page links to all pages to monitor
-- 💬 **Thread-Aware**: Groups comments by discussion thread, replies in context
-- 💾 **State Persistence**: Tracks processed comments to avoid duplicates
+- Polls Notion comments (page-level + inline comments)
+- Groups by discussion thread and replies in-thread
+- Supports **index page** mode (auto-discover linked pages)
+- Stores processed comment IDs in `state.json` to avoid duplicate replies
 
-## Architecture
+## Security/architecture updates (v0.2.0)
 
-```
-Notion Pages → [Polling] → New Comments? → [Agent] → AI Reply → [Notion API] → Reply Posted
-      ↑                                                                              
-Index Page (optional) — contains links to pages to monitor
-```
+Compared to the original version:
+
+1. Supports **env-based secrets** (`*_Env`) to avoid plain-text keys in `config.json`
+2. Supports `plugins.entries.<id>.config` (preferred) in `openclaw.json`
+3. Defaults to local **OpenClaw Gateway** `/v1/chat/completions`
+4. Can fallback to external AI API (`aiBaseUrl + aiApiKey/aiApiKeyEnv`)
+
+---
 
 ## Prerequisites
 
-- [OpenClaw](https://github.com/nicepkg/openclaw) v2026.1.x+
-- A Notion Integration ([create one here](https://www.notion.so/profile/integrations))
+- OpenClaw `v2026.1.x+`
+- A Notion Integration with capabilities:
+  - Read content
+  - Read comments
+  - Insert comments
 
 ## Installation
 
-### 1. Clone the plugin
-
 ```bash
 cd ~/.openclaw/extensions
-git clone https://github.com/ClarkYoung-xhs/openclaw-notion-doc-comment.git notion-doc-comment
+git clone https://github.com/ClarkYoung-xhs/openclaw-notion-comment.git notion-doc-comment
 cd notion-doc-comment
 npm install
 ```
 
-### 2. Create a Notion Integration
-
-1. Go to [notion.so/profile/integrations](https://www.notion.so/profile/integrations)
-2. Click **New integration**
-3. Select your workspace
-4. Enable capabilities:
-   - ✅ Read content
-   - ✅ Read comments
-   - ✅ Insert comments
-5. Copy the **Internal Integration Secret** (`secret_xxx`)
-
-### 3. Connect to pages
+## Notion setup
 
 For each page you want to monitor:
-1. Open the page in Notion
-2. Click `...` → **Connect to** → Select your integration
 
-### 4. Configure the plugin
+1. Open the page
+2. `...` → **Connect to** → select your integration
 
-```bash
-cp config.example.json config.json
-```
+---
 
-Edit `config.json`:
+## Configuration (recommended)
 
-```json
-{
-    "notionApiKey": "secret_your_token_here",
-    "pollIntervalMinutes": 15,
-    "indexPage": "",
-    "watchedPages": ["page-id-1", "page-id-2"],
-    "integrationUserId": ""
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `notionApiKey` | Your Notion integration secret |
-| `pollIntervalMinutes` | How often to check for new comments (default: 15) |
-| `indexPage` | ID of a page whose child pages/links are auto-watched |
-| `watchedPages` | Explicit list of page IDs to monitor |
-| `integrationUserId` | Your integration's user ID (prevents self-reply loops) |
-
-> **Tip**: Use `indexPage` for easy management — just add/remove links in one page.
-
-### 5. Register in OpenClaw
-
-Add to `~/.openclaw/openclaw.json`:
+### 1) Plugin entry in `~/.openclaw/openclaw.json`
 
 ```json
 {
-    "plugins": {
-        "entries": {
-            "notion-doc-comment": {
-                "enabled": true,
-                "path": "~/.openclaw/extensions/notion-doc-comment"
-            }
+  "plugins": {
+    "entries": {
+      "notion-doc-comment": {
+        "enabled": true,
+        "path": "~/.openclaw/extensions/notion-doc-comment",
+        "config": {
+          "pollIntervalMinutes": 15,
+          "indexPage": "",
+          "watchedPages": ["page-id-1", "page-id-2"],
+          "integrationUserId": "",
+
+          "notionApiKeyEnv": "NOTION_API_KEY",
+
+          "useGatewayChatCompletions": true,
+          "gatewayBaseUrl": "http://127.0.0.1:18789/v1",
+          "gatewayApiKeyEnv": "OPENCLAW_GATEWAY_TOKEN",
+
+          "aiBaseUrl": "https://right.codes/codex/v1",
+          "aiApiKeyEnv": "RIGHTCODE_API_KEY",
+          "aiModel": "openclaw:friday"
         }
+      }
     }
+  }
 }
 ```
 
-Restart OpenClaw:
+### 2) Environment variables (recommended)
 
 ```bash
-systemctl --user restart openclaw-gateway
+export NOTION_API_KEY='secret_xxx'
+export OPENCLAW_GATEWAY_TOKEN='your_gateway_token'
+# optional fallback only
+export RIGHTCODE_API_KEY='your_external_ai_key'
 ```
 
-## How It Works
+> Tip: in production, set these in your service manager (systemd/docker env), not shell profile.
 
-1. **Startup**: Plugin initializes, reads config, creates Notion client
-2. **Index Page** (optional): Reads the index page, extracts all linked page IDs
-3. **Polling Loop**: Every N minutes:
-   - Fetches all comments for each watched page
-   - Groups comments by discussion thread
-   - Finds new/unprocessed comments
-   - Sends comment text to AI agent
-   - Posts AI reply in the same discussion thread
-4. **State**: Saves processed comment IDs to `state.json` to avoid duplicates
+---
 
-## Finding Page IDs
+## Legacy config (`config.json`) still supported
 
-A Notion page URL like:
-```
-https://www.notion.so/My-Page-Title-abc123def456789012345678abcdef01
-```
+You can still use `config.json` inside plugin directory.
 
-The page ID is the last 32 hex characters: `abc123def456789012345678abcdef01`
+Config priority:
 
-Or in UUID format: `abc123de-f456-7890-1234-5678abcdef01`
+1. `plugins.entries.notion-doc-comment.config` (highest)
+2. `config.json` (legacy)
+
+`config.example.json` is updated and now env-first.
+
+---
+
+## Key fields
+
+- `pollIntervalMinutes`: Poll interval in minutes
+- `indexPage`: Index page ID for link-based discovery
+- `watchedPages`: Explicit page IDs (used if index page yields none)
+- `integrationUserId`: Avoid self-reply loops
+- `notionApiKey` / `notionApiKeyEnv`: Notion token source
+- `useGatewayChatCompletions`: use local OpenClaw gateway first (default `true`)
+- `gatewayBaseUrl`: default `http://127.0.0.1:18789/v1`
+- `gatewayApiKey` / `gatewayApiKeyEnv`: optional gateway bearer token
+- `aiBaseUrl`: external fallback base URL
+- `aiApiKey` / `aiApiKeyEnv`: external fallback API key
+- `aiModel`:
+  - Gateway mode: can use `openclaw:<agentId>` (e.g. `openclaw:friday`)
+  - External mode: use provider model name
+- `systemPrompt`: optional system prompt override
+
+---
+
+## Notes
+
+- If gateway `/v1/chat/completions` is unavailable and no external key is provided, plugin returns a temporary failure message.
+- `state.json` and `config.json` are ignored by git.
 
 ## License
 

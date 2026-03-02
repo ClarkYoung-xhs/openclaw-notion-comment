@@ -1,10 +1,14 @@
 {
-    "notionApiKey": "secret_your_notion_integration_token",
-    "pollIntervalMinutes": 15,
-    "indexPage": "",
-    "watchedPages": [],
-    "integrationUserId": "",
-    "aiBaseUrl": "https://right.codes/codex/v1",
-    "aiApiKey": "your-ai-api-key",
-    "aiModel": "gpt-5.3-codex-xhigh"
+  "notionApiKeyEnv": "NOTION_API_KEY",
+  "pollIntervalMinutes": 15,
+  "indexPage": "",
+  "watchedPages": [],
+  "integrationUserId": "",
+  "useGatewayChatCompletions": true,
+  "gatewayBaseUrl": "http://127.0.0.1:18789/v1",
+  "gatewayApiKeyEnv": "OPENCLAW_GATEWAY_TOKEN",
+  "aiBaseUrl": "https://right.codes/codex/v1",
+  "aiApiKeyEnv": "RIGHTCODE_API_KEY",
+  "aiModel": "openclaw:friday",
+  "systemPrompt": "你是一个友好、专业的 AI 助手。用户在 Notion 文档中发表了评论，请用简洁的中文回复。不要使用 Markdown 格式。"
 }
