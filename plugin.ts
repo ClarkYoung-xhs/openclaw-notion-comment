@@ -38,10 +38,17 @@ interface PluginConfig {
     indexPage?: string;      // Index page ID - reads links from this page
     watchedPages: string[];  // Fallback: explicit page IDs
     notionApiKey?: string;   // Notion integration secret
+    notionApiKeyEnv?: string; // Env var name for Notion API key
     integrationUserId?: string; // Bot user ID to avoid self-reply
     aiBaseUrl?: string;      // AI API base URL (e.g. https://right.codes/codex/v1)
     aiApiKey?: string;       // AI API key
+    aiApiKeyEnv?: string;    // Env var name for AI API key
     aiModel?: string;        // AI model name (e.g. gpt-5.1-codex)
+    useGatewayChatCompletions?: boolean; // Prefer local OpenClaw gateway /v1/chat/completions
+    gatewayBaseUrl?: string; // Local gateway base URL (default http://127.0.0.1:18789/v1)
+    gatewayApiKey?: string;  // Optional Bearer token for gateway HTTP endpoint
+    gatewayApiKeyEnv?: string; // Env var name for gateway API key
+    systemPrompt?: string;   // Optional override for assistant system prompt
 }
 
 interface ProcessedState {
@@ -66,6 +73,20 @@ function loadPluginConfig(): Partial<PluginConfig> {
         }
     }
     return {};
+}
+
+function getEnv(name?: string): string {
+    if (!name) return "";
+    return process.env[name] ?? "";
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string {
+    for (const value of values) {
+        if (typeof value === "string" && value.trim().length > 0) {
+            return value.trim();
+        }
+    }
+    return "";
 }
 
 // Helper functions
@@ -304,33 +325,35 @@ async function getWatchedPagesFromIndex(
     return extractPageLinks(blocks);
 }
 
-// AI completion via direct API call
-async function callAI(
-    config: PluginConfig,
+function normalizeBaseUrl(baseUrl: string): string {
+    return baseUrl.replace(/\/+$/, "");
+}
+
+function extractAssistantTextFromChatCompletions(data: any): string {
+    return data?.choices?.[0]?.message?.content || "";
+}
+
+async function callChatCompletions(
+    baseUrl: string,
+    apiKey: string,
+    model: string,
+    systemPrompt: string,
     prompt: string
 ): Promise<string> {
-    const baseUrl = config.aiBaseUrl || "https://right.codes/codex/v1";
-    const apiKey = config.aiApiKey;
-    const model = config.aiModel || "gpt-5.3-codex-xhigh";
-
-    if (!apiKey) {
-        console.error(`${LOG_PREFIX} AI API key not configured. Set "aiApiKey" in config.json`);
-        return "抱歉，AI 回复功能未配置。";
+    const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+    };
+    if (apiKey) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
     }
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/chat/completions`, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`,
-        },
+        headers,
         body: JSON.stringify({
             model,
             messages: [
-                {
-                    role: "system",
-                    content: "你是一个友好、专业的 AI 助手。用户在 Notion 文档中发表了评论，请用简洁的中文回复。不要使用 Markdown 格式。",
-                },
+                { role: "system", content: systemPrompt },
                 { role: "user", content: prompt },
             ],
             max_tokens: 1024,
@@ -343,7 +366,62 @@ async function callAI(
     }
 
     const data = await response.json() as any;
-    return data.choices?.[0]?.message?.content || "抱歉，我暂时无法处理这条评论。";
+    const text = extractAssistantTextFromChatCompletions(data);
+    return text || "抱歉，我暂时无法处理这条评论。";
+}
+
+// AI completion: prefer local OpenClaw gateway, fallback to external API
+async function callAI(
+    config: PluginConfig,
+    prompt: string
+): Promise<string> {
+    const systemPrompt =
+        config.systemPrompt ||
+        "你是一个友好、专业的 AI 助手。用户在 Notion 文档中发表了评论，请用简洁的中文回复。不要使用 Markdown 格式。";
+
+    const useGateway = config.useGatewayChatCompletions !== false;
+    const gatewayModel = config.aiModel || "openclaw:friday";
+    const externalModel =
+        config.aiModel && !config.aiModel.startsWith("openclaw:")
+            ? config.aiModel
+            : "gpt-5.3-codex-xhigh";
+
+    const gatewayBaseUrl = config.gatewayBaseUrl || "http://127.0.0.1:18789/v1";
+    const gatewayApiKey = firstNonEmpty(config.gatewayApiKey, getEnv(config.gatewayApiKeyEnv));
+
+    const externalBaseUrl = config.aiBaseUrl || "https://right.codes/codex/v1";
+    const externalApiKey = firstNonEmpty(config.aiApiKey, getEnv(config.aiApiKeyEnv));
+
+    if (useGateway) {
+        try {
+            return await callChatCompletions(
+                gatewayBaseUrl,
+                gatewayApiKey,
+                gatewayModel,
+                systemPrompt,
+                prompt
+            );
+        } catch (error: any) {
+            console.error(`${LOG_PREFIX} Gateway chat/completions failed:`, error?.message || error);
+            if (!externalApiKey) {
+                return "抱歉，AI 网关暂时不可用，请稍后再试。";
+            }
+            console.log(`${LOG_PREFIX} Falling back to external AI API`);
+        }
+    }
+
+    if (!externalApiKey) {
+        console.error(`${LOG_PREFIX} AI API key not configured. Set aiApiKey/aiApiKeyEnv or enable gateway chat completions.`);
+        return "抱歉，AI 回复功能未配置。";
+    }
+
+    return callChatCompletions(
+        externalBaseUrl,
+        externalApiKey,
+        externalModel,
+        systemPrompt,
+        prompt
+    );
 }
 
 // Agent integration
@@ -503,34 +581,31 @@ async function pollNotionComments(
 export default function createPlugin(ctx: any) {
     const { config } = ctx;
 
-    // DEBUG: Explore runtime API to support "Chat over Comment"
-    if (ctx.runtime) {
-        console.log(`${LOG_PREFIX} runtime keys:`, Object.keys(ctx.runtime));
-        if (ctx.runtime.channel) {
-            console.log(`${LOG_PREFIX} runtime.channel keys:`, Object.keys(ctx.runtime.channel));
-            // Log types of channel methods
-            for (const k of Object.keys(ctx.runtime.channel)) {
-                console.log(`${LOG_PREFIX} runtime.channel.${k} type:`, typeof ctx.runtime.channel[k]);
-            }
-        }
-        if (ctx.runtime.system) {
-            console.log(`${LOG_PREFIX} runtime.system keys:`, Object.keys(ctx.runtime.system));
-        }
-    }
+    const entryConfig = config?.plugins?.entries?.["notion-doc-comment"]?.config ?? {};
 
-    // Load config.json for plugin-specific settings
+    // Load config.json for plugin-specific settings (legacy/compat)
     const fileConfig = loadPluginConfig();
 
-    // Notion API key: from config.json (preferred) or openclaw.json
-    const notionApiKey =
-        fileConfig.notionApiKey ||
-        config.channels?.notion?.apiKey ||
-        "";
+    // Merge priority: plugins.entries.<id>.config > config.json
+    const merged: Partial<PluginConfig> = {
+        ...fileConfig,
+        ...entryConfig,
+    };
+
+    // Notion API key resolution priority:
+    // 1) direct config notionApiKey
+    // 2) env var from notionApiKeyEnv
+    // 3) channels.notion.apiKey in openclaw.json
+    const notionApiKey = firstNonEmpty(
+        merged.notionApiKey,
+        getEnv(merged.notionApiKeyEnv),
+        config.channels?.notion?.apiKey
+    );
 
     if (!notionApiKey) {
         console.error(
             `${LOG_PREFIX} Notion API key not configured. ` +
-            `Set "notionApiKey" in config.json or configure channels.notion.apiKey in openclaw.json`
+            `Set notionApiKey/notionApiKeyEnv (recommended) or channels.notion.apiKey`
         );
         return;
     }
@@ -538,13 +613,22 @@ export default function createPlugin(ctx: any) {
     const notion = new Client({ auth: notionApiKey });
 
     const pluginConfig: PluginConfig = {
-        enabled: config.plugins?.entries?.["notion-doc-comment"]?.enabled ?? true,
-        pollIntervalMinutes: fileConfig.pollIntervalMinutes ?? 15,
-        indexPage: fileConfig.indexPage,
-        watchedPages: fileConfig.watchedPages ?? [],
-        aiBaseUrl: fileConfig.aiBaseUrl,
-        aiApiKey: fileConfig.aiApiKey,
-        aiModel: fileConfig.aiModel,
+        enabled: (config.plugins?.entries?.["notion-doc-comment"]?.enabled ?? true) as boolean,
+        pollIntervalMinutes: merged.pollIntervalMinutes ?? 15,
+        indexPage: merged.indexPage,
+        watchedPages: merged.watchedPages ?? [],
+        notionApiKey: merged.notionApiKey,
+        notionApiKeyEnv: merged.notionApiKeyEnv,
+        integrationUserId: merged.integrationUserId,
+        aiBaseUrl: merged.aiBaseUrl,
+        aiApiKey: merged.aiApiKey,
+        aiApiKeyEnv: merged.aiApiKeyEnv,
+        aiModel: merged.aiModel,
+        useGatewayChatCompletions: merged.useGatewayChatCompletions,
+        gatewayBaseUrl: merged.gatewayBaseUrl,
+        gatewayApiKey: merged.gatewayApiKey,
+        gatewayApiKeyEnv: merged.gatewayApiKeyEnv,
+        systemPrompt: merged.systemPrompt,
     };
 
     if (!pluginConfig.enabled) {
@@ -553,7 +637,7 @@ export default function createPlugin(ctx: any) {
     }
 
     // Get integration user ID from config (to avoid replying to ourselves)
-    const integrationUserId = fileConfig.integrationUserId;
+    const integrationUserId = pluginConfig.integrationUserId;
 
     const indexInfo = pluginConfig.indexPage
         ? `index page: ${pluginConfig.indexPage}`
@@ -582,6 +666,6 @@ export default function createPlugin(ctx: any) {
 
     return {
         name: "notion-doc-comment",
-        version: "0.1.0",
+        version: "0.2.0",
     };
 }

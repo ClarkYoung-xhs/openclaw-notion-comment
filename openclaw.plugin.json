@@ -1,32 +1,96 @@
 {
-    "id": "notion-doc-comment",
-    "name": "Notion Document Comment",
-    "version": "0.1.0",
-    "description": "Monitor and respond to Notion page comments via polling. Supports index page pattern.",
-    "author": "Clark",
-    "configSchema": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "enabled": {
-                "type": "boolean",
-                "default": true
-            },
-            "pollIntervalMinutes": {
-                "type": "number",
-                "default": 15
-            },
-            "indexPage": {
-                "type": "string",
-                "description": "ID of index page containing links to monitored pages"
-            },
-            "watchedPages": {
-                "type": "array",
-                "items": {
-                    "type": "string"
-                },
-                "default": []
-            }
-        }
+  "id": "notion-doc-comment",
+  "name": "Notion Document Comment",
+  "version": "0.2.0",
+  "description": "Monitor and respond to Notion page comments via polling. Supports index page pattern.",
+  "author": "Clark",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "pollIntervalMinutes": {
+        "type": "number",
+        "minimum": 1,
+        "default": 15
+      },
+      "indexPage": {
+        "type": "string",
+        "description": "ID of index page containing links to monitored pages"
+      },
+      "watchedPages": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      },
+      "notionApiKey": {
+        "type": "string",
+        "description": "Notion integration secret (prefer notionApiKeyEnv in production)"
+      },
+      "notionApiKeyEnv": {
+        "type": "string",
+        "description": "Environment variable name for Notion API key (e.g. NOTION_API_KEY)"
+      },
+      "integrationUserId": {
+        "type": "string",
+        "description": "Notion integration user id to avoid self-reply loops"
+      },
+      "useGatewayChatCompletions": {
+        "type": "boolean",
+        "default": true,
+        "description": "Prefer local OpenClaw gateway /v1/chat/completions over external AI API"
+      },
+      "gatewayBaseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:18789/v1"
+      },
+      "gatewayApiKey": {
+        "type": "string",
+        "description": "Optional Bearer token for gateway HTTP endpoint"
+      },
+      "gatewayApiKeyEnv": {
+        "type": "string",
+        "description": "Environment variable name for gateway token"
+      },
+      "aiBaseUrl": {
+        "type": "string",
+        "default": "https://right.codes/codex/v1"
+      },
+      "aiApiKey": {
+        "type": "string",
+        "description": "External AI API key for fallback mode"
+      },
+      "aiApiKeyEnv": {
+        "type": "string",
+        "description": "Environment variable name for external AI API key"
+      },
+      "aiModel": {
+        "type": "string",
+        "default": "openclaw:friday"
+      },
+      "systemPrompt": {
+        "type": "string",
+        "description": "Optional system prompt override"
+      }
     }
+  },
+  "uiHints": {
+    "notionApiKey": {
+      "sensitive": true,
+      "label": "Notion API Key"
+    },
+    "gatewayApiKey": {
+      "sensitive": true,
+      "label": "Gateway API Key"
+    },
+    "aiApiKey": {
+      "sensitive": true,
+      "label": "External AI API Key"
+    }
+  }
 }
